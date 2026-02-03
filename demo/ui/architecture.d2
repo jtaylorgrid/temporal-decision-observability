@@ -1,0 +1,63 @@
+direction: right
+
+Data Sources: {
+  Temporal Workflows
+  ML Models: {
+    Churn Predictions
+  }
+  Future Sources: {
+    style.stroke-dash: 3
+    CRM, ERP, Logs: {
+      style.stroke-dash: 3
+    }
+  }
+}
+
+Data Capture: {
+  CDC via Kafka Connect: {
+    shape: hexagon
+    label: CDC\n(Kafka Connect)
+  }
+  Direct Activity Writes: {
+    shape: hexagon
+    label: Activity Writes\n(xtdb.Save)
+  }
+}
+
+XTDB: {
+  Valid Time: {
+    label: Valid Time\n(when facts were true)
+  }
+  System Time: {
+    label: System Time\n(when recorded)
+  }
+  SQL + Time Travel
+}
+
+Decision Observability: {
+  What was known at decision time?: {
+    shape: document
+  }
+  What should have happened?: {
+    shape: document
+  }
+  Web UI
+}
+
+Data Sources.Temporal Workflows -> Data Capture.CDC via Kafka Connect
+Data Sources.ML Models -> Data Capture.CDC via Kafka Connect
+Data Sources.Future Sources -> Data Capture.CDC via Kafka Connect: {
+  style.stroke-dash: 3
+}
+
+Data Sources.Temporal Workflows -> Data Capture.Direct Activity Writes: {
+  label: from activities
+}
+
+Data Capture.CDC via Kafka Connect -> XTDB
+Data Capture.Direct Activity Writes -> XTDB
+
+XTDB.SQL + Time Travel -> Decision Observability.What was known at decision time?
+XTDB.SQL + Time Travel -> Decision Observability.What should have happened?
+Decision Observability.What was known at decision time? -> Decision Observability.Web UI
+Decision Observability.What should have happened? -> Decision Observability.Web UI

@@ -1,0 +1,15 @@
+temporal:
+  host_port: "localhost:7233"
+  namespace: "default"
+
+xtdb:
+  conn_string: "postgres://localhost:5432/xtdb?sslmode=disable"
+  max_conns: 10
+
+pipeline:
+  poll_interval: 10s
+  batch_size: 100
+
+logging:
+  level: info
+  format: json
