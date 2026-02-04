@@ -2,12 +2,18 @@ package xtdb
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.temporal.io/sdk/activity"
+)
+
+const (
+	JsonOID = 114
 )
 
 type Client struct {
@@ -66,28 +72,50 @@ func (c *Client) Save(ctx context.Context, dc DecisionContext) error {
 		}
 	}
 
-	fields := []string{
-		fmt.Sprintf("_id: %s", quote(dc.ID)),
-		fmt.Sprintf("_valid_from: TIMESTAMP %s", quote(dc.ValidFrom.Format(time.RFC3339Nano))),
-	}
+	record := make(map[string]any)
+	record["_id"] = dc.ID
+	record["_valid_from"] = dc.ValidFrom.Format(time.RFC3339Nano)
 
 	if dc.WorkflowID != "" {
-		fields = append(fields, fmt.Sprintf("workflow_id: %s", quote(dc.WorkflowID)))
+		record["workflow_id"] = dc.WorkflowID
 	}
 	if dc.RunID != "" {
-		fields = append(fields, fmt.Sprintf("run_id: %s", quote(dc.RunID)))
+		record["run_id"] = dc.RunID
 	}
 	if dc.ActivityID != "" {
-		fields = append(fields, fmt.Sprintf("activity_id: %s", quote(dc.ActivityID)))
+		record["activity_id"] = dc.ActivityID
 	}
 
 	for k, v := range dc.Data {
-		fields = append(fields, fmt.Sprintf("%s: %s", k, formatValue(v)))
+		if t, ok := v.(time.Time); ok {
+			record[k] = t.Format(time.RFC3339Nano)
+		} else {
+			record[k] = v
+		}
 	}
 
-	sql := fmt.Sprintf("INSERT INTO %s RECORDS {%s}", dc.Table, strings.Join(fields, ", "))
+	jsonData, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("marshal record to JSON: %w", err)
+	}
 
-	_, err := c.pool.Exec(ctx, sql)
+	sql := fmt.Sprintf("INSERT INTO %s RECORDS $1", dc.Table)
+
+	conn, err := c.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire connection: %w", err)
+	}
+	defer conn.Release()
+
+	rr := conn.Conn().PgConn().ExecParams(
+		ctx,
+		sql,
+		[][]byte{jsonData},
+		[]uint32{JsonOID},
+		[]int16{pgx.TextFormatCode},
+		[]int16{},
+	)
+	_, err = rr.Close()
 	if err != nil {
 		return fmt.Errorf("save to XTDB: %w", err)
 	}
@@ -105,26 +133,25 @@ func (c *Client) SaveDecision(ctx context.Context, table string, data map[string
 	})
 }
 
-func quote(s string) string {
-	escaped := strings.ReplaceAll(s, "'", "''")
-	return "'" + escaped + "'"
-}
-
-func formatValue(v any) string {
-	switch val := v.(type) {
-	case string:
-		return quote(val)
-	case int, int32, int64, uint, uint32, uint64:
-		return fmt.Sprintf("%d", val)
-	case float32, float64:
-		return fmt.Sprintf("%v", val)
-	case bool:
-		return fmt.Sprintf("%t", val)
-	case time.Time:
-		return fmt.Sprintf("TIMESTAMP %s", quote(val.Format(time.RFC3339Nano)))
-	case nil:
-		return "NULL"
-	default:
-		return quote(fmt.Sprintf("%v", val))
+func (c *Client) ExecParams(ctx context.Context, sql string, params [][]byte, paramOIDs []uint32) (pgconn.CommandTag, error) {
+	conn, err := c.pool.Acquire(ctx)
+	if err != nil {
+		return pgconn.CommandTag{}, fmt.Errorf("acquire connection: %w", err)
 	}
+	defer conn.Release()
+
+	paramFormats := make([]int16, len(params))
+	for i := range paramFormats {
+		paramFormats[i] = pgx.TextFormatCode
+	}
+
+	rr := conn.Conn().PgConn().ExecParams(
+		ctx,
+		sql,
+		params,
+		paramOIDs,
+		paramFormats,
+		[]int16{},
+	)
+	return rr.Close()
 }
